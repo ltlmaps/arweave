@@ -46,6 +46,7 @@
 		ar_retarget,
 		ar_weave,
 		ar_join,
+		ar_data_sync_tests,
 		ar_poa_tests,
 		ar_node_tests,
 		ar_fork_recovery,
@@ -473,6 +474,7 @@ start(
 	end,
 	{ok, _} = ar_poller_sup:start_link(PollingArgs),
 	{ok, _} = ar_downloader_sup:start_link([]),
+	{ok, _} = ar_data_sync_sup:start_link([]),
 	if Mine -> ar_node:automine(Node); true -> do_nothing end,
 	case IPFSPin of
 		false -> ok;

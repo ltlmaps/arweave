@@ -109,11 +109,7 @@
 
 %% @doc The maximum allowed size in bytes for the data field of
 %% a format=1 transaction.
--ifdef(DEBUG).
--define(TX_DATA_SIZE_LIMIT, 10 * 1024).
--else.
 -define(TX_DATA_SIZE_LIMIT, 10 * 1024 * 1024).
--endif.
 
 %% @doc The maximum allowed size in bytes for the combined data fields of
 %% the format=1 transactions included in a block.
@@ -145,7 +141,7 @@
 %% The data field of a format=1 transaction is considered to be part of
 %% its headers.
 -ifdef(DEBUG).
--define(MEMPOOL_HEADER_SIZE_LIMIT, 50 * 1024).
+-define(MEMPOOL_HEADER_SIZE_LIMIT, 50 * 1024 * 1024).
 -else.
 -define(MEMPOOL_HEADER_SIZE_LIMIT, 250 * 1024 * 1024).
 -endif.
@@ -154,7 +150,7 @@
 %% The format=1 transactions are not counted as their data is considered
 %% to be part of the header.
 -ifdef(DEBUG).
--define(MEMPOOL_DATA_SIZE_LIMIT, 50 * 1024).
+-define(MEMPOOL_DATA_SIZE_LIMIT, 50 * 1024 * 1024).
 -else.
 -define(MEMPOOL_DATA_SIZE_LIMIT, 500 * 1024 * 1024).
 -endif.
@@ -275,6 +271,10 @@
 -define(WALLET_LIST_DIR, "wallet_lists").
 %% @doc Directory for storing the ArQL v2 index.
 -define(SQLITE3_DIR, "data/sqlite3").
+%% @doc Directory for storing data chunks.
+-define(DATA_CHUNK_DIR, "data_chunks").
+%% @doc Directory for RocksDB key-value storages.
+-define(ROCKS_DB_DIR, "rocksdb").
 
 %% @doc Port to use for cross-machine message transfer.
 -define(DEFAULT_HTTP_IFACE_PORT, 1984).
@@ -317,15 +317,12 @@
 -define(DIFF_ADJUSTMENT_UP_LIMIT, 4).
 
 %% @doc Max size of a single data chunk, in bytes.
--ifdef(DEBUG).
--define(DATA_CHUNK_SIZE, 128).
--else.
 -define(DATA_CHUNK_SIZE, (256 * 1024)).
--endif.
 %% @doc Max size of the PoA data path, in bytes.
 -define(MAX_PATH_SIZE, (256 * 1024)).
 %% @doc The size of data chunk hashes, in bytes.
 -define(CHUNK_ID_HASH_SIZE, 32).
+-define(NOTE_SIZE, 32).
 
 %% @doc A succinct proof of access to a recall byte found in a TX.
 -record(poa, {

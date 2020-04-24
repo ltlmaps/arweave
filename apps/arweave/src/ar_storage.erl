@@ -4,7 +4,7 @@
 -export([write_block/1, write_block/2, write_full_block/1, write_full_block/2]).
 -export([read_block/1, read_block/2, read_block_shadow/1]).
 -export([invalidate_block/1, blocks_on_disk/0]).
--export([write_tx/1, write_tx_data/3, read_tx/1, read_tx_data/1]).
+-export([write_tx/1, write_tx_data/2, read_tx/1, read_tx_data/1]).
 -export([read_wallet_list/1]).
 -export([write_block_index/1, read_block_index/0]).
 -export([delete_tx/1]).
@@ -15,6 +15,8 @@
 -export([read_tx_file/1]).
 -export([ensure_directories/0, clear/0]).
 -export([write_file_atomic/2]).
+-export([has_chunk/2, write_chunk/4, read_chunk/2]).
+-export([write_term/2, read_term/1, delete_term/1]).
 
 -include("ar.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -301,9 +303,15 @@ write_tx(#tx{ format = 1 } = TX) ->
 write_tx(#tx{ format = 2 } = TX) ->
 	case write_tx_header(TX#tx{ data = <<>> }) of
 		ok ->
-			case byte_size(TX#tx.data) > 0 of
+			DataSize = byte_size(TX#tx.data),
+			case DataSize > 0 of
 				true ->
-					write_tx_data(TX#tx.id, TX#tx.data_root, TX#tx.data);
+					case DataSize == TX#tx.data_size of
+						true ->
+							write_tx_data(TX#tx.data_root, TX#tx.data);
+						false ->
+							ar:err([{event, failed_to_store_v2_data}, {reason, size_mismatch}])
+					end;
 				false ->
 					ok
 			end;
@@ -346,28 +354,43 @@ write_tx_header_after_scan(TX) ->
 			{error, not_enough_space}
 	end.
 
-write_tx_data(ID, ExpectedDataRoot, Data) ->
-	case (ar_tx:generate_chunk_tree(#tx{ data = Data }))#tx.data_root of
-		ExpectedDataRoot ->
-			write_tx_data(tx_data_filepath(ID), ar_util:encode(Data));
+write_tx_data(ExpectedDataRoot, Data) ->
+	Chunks = ar_tx:chunk_binary(?DATA_CHUNK_SIZE, Data),
+	SizeTaggedChunks = ar_tx:chunks_to_size_tagged_chunks(Chunks),
+	SizeTaggedChunkIDs = ar_tx:sized_chunks_to_sized_chunk_ids(SizeTaggedChunks),
+	case ar_merkle:generate_tree(SizeTaggedChunkIDs) of
+		{ExpectedDataRoot, DataTree} ->
+			lists:foreach(
+				fun
+					({<<>>, _}) ->
+						%% Empty chunks are produced by ar_tx:chunk_binary/2, when
+						%% the data is evenly split by the given chunk size. They are
+						%% the last chunks of the corresponding transactions and have
+						%% the same end offsets as their preceding chunks. They are never
+						%% picked as recall chunks because recall byte has to be strictly
+						%% smaller than the end offset. They are an artifact of the original
+						%% chunking implementation. There is no value in storing them.
+						ignore_empty_chunk;
+					({Chunk, Offset}) ->
+							DataPath =
+								ar_merkle:generate_path(ExpectedDataRoot, Offset - 1, DataTree),
+							Proof = #{
+								data_root => ExpectedDataRoot,
+								chunk => Chunk,
+								offset => Offset - 1,
+								data_path => DataPath
+							},
+							case catch ar_data_sync:add_chunk(Proof) of
+								ok ->
+									ok;
+								Error ->
+									ar:err([{event, failed_to_store_v2_chunk}, {reason, Error}])
+							end
+				end,
+				SizeTaggedChunks
+			);
 		_ ->
 			{error, invalid_data_root}
-	end.
-
-write_tx_data(Filepath, EncodedData) ->
-	ByteSize = byte_size(EncodedData),
-	case enough_space(ByteSize) of
-		true ->
-			write_file_atomic(Filepath, EncodedData),
-			ar_meta_db:increase(used_space, ByteSize),
-			ok;
-		false ->
-			ar:err(
-				[
-					{event, not_enough_space_to_write_tx_data}
-				]
-			),
-			{error, not_enough_space}
 	end.
 
 %% @doc Read a tx from disk, given a hash.
@@ -595,6 +618,65 @@ write_file_atomic(Filename, Data) ->
 		Error ->
 			Error
 	end.
+
+has_chunk(TXRoot, DataPathHash) ->
+	DataDir = ar_meta_db:get(data_dir),
+	TXRootDir = filename:join([DataDir, ?DATA_CHUNK_DIR, ar_util:encode(TXRoot)]),
+	case filelib:is_dir(TXRootDir) of
+		false ->
+			false;
+		true ->
+			filelib:is_file(filename:join(TXRootDir, ar_util:encode(DataPathHash)))
+	end.
+
+write_chunk(TXRoot, DataPathHash, Chunk, DataPath) ->
+	DataDir = ar_meta_db:get(data_dir),
+	TXRootDir = filename:join([DataDir, ?DATA_CHUNK_DIR, ar_util:encode(TXRoot)]),
+	case filelib:ensure_dir(binary_to_list(TXRootDir) ++ "/") of
+		{error, Reason} ->
+			{error, Reason};
+		ok ->
+			Data = term_to_binary({Chunk, DataPath}),
+			file:write_file(filename:join(TXRootDir, ar_util:encode(DataPathHash)), Data)
+	end.
+
+read_chunk(TXRoot, DataPathHash) ->
+	DataDir = ar_meta_db:get(data_dir),
+	TXRootDir = filename:join([DataDir, ?DATA_CHUNK_DIR, ar_util:encode(TXRoot)]),
+	case file:read_file(filename:join(TXRootDir, ar_util:encode(DataPathHash))) of
+		{error, enoent} ->
+			not_found;
+		{ok, Binary} ->
+			{ok, binary_to_term(Binary)};
+		Error ->
+			Error
+	end.
+
+write_term(Name, Term) ->
+	DataDir = ar_meta_db:get(data_dir),
+	case write_file_atomic(filename:join(DataDir, atom_to_list(Name)), term_to_binary(Term)) of
+		ok ->
+			ok;
+		{error, Reason} = Error ->
+			ar:err([{event, failed_to_write_term}, {name, Name}, {reason, Reason}]),
+			Error
+	end.
+
+read_term(Name) ->
+	DataDir = ar_meta_db:get(data_dir),
+	case file:read_file(filename:join(DataDir, atom_to_list(Name))) of
+		{ok, Binary} ->
+			{ok, binary_to_term(Binary)};
+		{error, enoent} ->
+			not_found;
+		{error, Reason} = Error ->
+			ar:err([{event, failed_to_read_term}, {name, Name}, {reason, Reason}]),
+			Error
+	end.
+
+delete_term(Name) ->
+	DataDir = ar_meta_db:get(data_dir),
+	file:delete(filename:join(DataDir, atom_to_list(Name))).
 
 %% @doc Test block storage.
 store_and_retrieve_block_test() ->

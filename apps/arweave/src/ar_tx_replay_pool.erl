@@ -129,7 +129,8 @@ pick_txs_to_keep_in_mempool(BlockTXPairs, TXs, Diff, Height, WalletList) ->
 create_state(BlockTXPairs) ->
 	MaxDepthTXs = lists:sublist(BlockTXPairs, ?MAX_TX_ANCHOR_DEPTH),
 	{BHL, Map} = lists:foldr(
-		fun({BH, TXIDs}, {BHL, Map}) ->
+		fun({BH, SizeTaggedTXs}, {BHL, Map}) ->
+			TXIDs = [TXID || {{TXID, _}, _} <- SizeTaggedTXs],
 			{[BH | BHL], maps:put(BH, sets:from_list(TXIDs), Map)}
 		end,
 		{[], maps:new()},
