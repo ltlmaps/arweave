@@ -83,6 +83,13 @@ register() ->
 			"The data fields of format=1 transactions are NOT considered "
 			"to be transaction data."
 		}
+	]),
+	prometheus_gauge:new([
+		{name, v2_index_data_size},
+		{
+			help,
+			"The size (in bytes) of the data stored and indexed in 2.1 chunk index."
+		}
 	]).
 
 label_http_path(Path) ->

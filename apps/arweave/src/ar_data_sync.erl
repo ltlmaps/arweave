@@ -808,6 +808,7 @@ store_sync_state(
 		block_index = BI
 	}
 ) ->
+	prometheus_gauge:set(v2_index_data_size, ar_intervals:sum(SyncRecord)),
 	ar_storage:write_term(data_sync_state, {SyncRecord, BI}).
 
 update_orphaned_chunks(OrphanedChunks, DataRootIndex, OrphanedChunkMap) ->
