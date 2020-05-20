@@ -90,6 +90,13 @@ register() ->
 			help,
 			"The size (in bytes) of the data stored and indexed in 2.1 chunk index."
 		}
+	]),
+	prometheus_gauge:new([
+		{name, weave_size},
+		{
+			help,
+			"The size of the weave (in bytes)."
+		}
 	]).
 
 label_http_path(Path) ->
