@@ -15,7 +15,7 @@
 -define(MAX_BACKOFF_INTERVAL_S, 2 * 60 * 60).
 %% The data above this size is synced chunk by chunk in ar_data_sync.
 -define(SYNC_DATA_BELOW_SIZE, ?MAX_SERVED_TX_DATA_SIZE).
-
+-define(INTERVAL_IN_MINUTE(Minutes), 1000 * 60 * Minutes).
 %%% This module contains the core transaction and block downloader.
 %%% After the node has joined the network, this process is started,
 %%% which continually downloads data until either the drive is full
@@ -48,6 +48,7 @@ init(_Args) ->
 	%% heap and do not perform expensive GC on them.
 	process_flag(message_queue_data, off_heap),
 	gen_server:cast(?MODULE, process_item),
+	gen_server:cast(?MODULE, cleanup),
 	{ok, #{ queue => queue:new() }}.
 
 handle_cast({enqueue_front, Item}, #{ queue := Queue } = State) ->
@@ -57,9 +58,23 @@ handle_cast({enqueue_random, Item}, #{ queue := Queue } = State) ->
 
 handle_cast(process_item, #{ queue := Queue } = State) ->
 	prometheus_gauge:set(downloader_queue_size, queue:len(Queue)),
-	UpdatedQueue = process_item(Queue),
+	UpdatedQueue = case ar_cleanup:is_full_disk() of
+		true ->
+			ar:warn([
+				{event, downloader_process_item_disc_space_is_full},
+				{state, State}
+			]),
+			Queue;
+		false ->
+			process_item(Queue)
+	end,
 	timer:apply_after(?PROCESS_ITEM_INTERVAL_MS, gen_server, cast, [?MODULE, process_item]),
-	{noreply, State#{ queue => UpdatedQueue}};
+	{noreply, State#{ queue => UpdatedQueue }};
+
+handle_cast(cleanup, State) ->
+	ar_cleanup:cleanup_disk(),
+	timer:apply_after(?INTERVAL_IN_MINUTE(10), gen_server, cast, [?MODULE, cleanup]),
+	{noreply, State};
 
 handle_cast(reset, State) ->
 	{noreply, State#{ queue => queue:new() }}.
