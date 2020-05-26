@@ -70,8 +70,8 @@ do_join(Node, RawPeers, NewB, BI) ->
 			ar_miner_log:joining(),
 			ar_arql_db:populate_db(?BI_TO_BHL(BI)),
 			ar_randomx_state:init(BI, Peers),
-			BlockTXPairs = get_block_and_trail(Peers, NewB, BI),
-			Node ! {fork_recovered, BI, BlockTXPairs, none},
+			{BlockHeightHash, BlockTXPairs} = get_block_and_trail(Peers, NewB, BI),
+			Node ! {fork_recovered, BI, BlockTXPairs, none, BlockHeightHash},
 			join_peers(Peers),
 			ar_miner_log:joined(),
 			{Recent, Rest} =
@@ -215,19 +215,19 @@ get_block_and_trail(_Peers, NewB, []) ->
 	%% Joining on the genesis block.
 	TXIDs = [TX#tx.id || TX <- NewB#block.txs],
 	ar_storage:write_block(NewB#block{ txs = TXIDs }),
-	[{NewB#block.indep_hash, ar_block:generate_size_tagged_list_from_txs(NewB#block.txs)}];
+	{gb_sets:from_list([{NewB#block.height, NewB#block.indep_hash}]), [{NewB#block.indep_hash, ar_block:generate_size_tagged_list_from_txs(NewB#block.txs)}]};
 get_block_and_trail(Peers, NewB, BI) ->
-	get_block_and_trail(Peers, NewB, 2 * ?MAX_TX_ANCHOR_DEPTH, BI, []).
+	get_block_and_trail(Peers, NewB, 2 * ?MAX_TX_ANCHOR_DEPTH, BI, [], gb_sets:new()).
 
-get_block_and_trail(_Peers, NewB, _BehindCurrent, _BI, BlockTXPairs)
+get_block_and_trail(_Peers, NewB, _BehindCurrent, _BI, BlockTXPairs, BlockHeightHash)
 		when NewB#block.height == 0 ->
 	ar_storage:write_full_block(NewB),
 	SizeTaggedTXs = ar_block:generate_size_tagged_list_from_txs(NewB#block.txs),
-	BlockTXPairs ++ [{NewB#block.indep_hash, SizeTaggedTXs}];
-get_block_and_trail(_, NewB, 0, _, BlockTXPairs) ->
+	{gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash), BlockTXPairs ++ [{NewB#block.indep_hash, SizeTaggedTXs}]};
+get_block_and_trail(_, NewB, 0, _, BlockTXPairs, BlockHeightHash) ->
 	SizeTaggedTXs = ar_block:generate_size_tagged_list_from_txs(NewB#block.txs),
-	BlockTXPairs ++ [{NewB#block.indep_hash, SizeTaggedTXs}];
-get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs) ->
+	{gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash), BlockTXPairs ++ [{NewB#block.indep_hash, SizeTaggedTXs}]};
+get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs, BlockHeightHash) ->
 	PreviousBlock = ar_http_iface_client:get_block(
 		Peers,
 		NewB#block.previous_block
@@ -237,6 +237,7 @@ get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs) ->
 			ar_storage:write_full_block(NewB),
 			SizeTaggedTXs = ar_block:generate_size_tagged_list_from_txs(NewB#block.txs),
 			NewBlockTXPairs = BlockTXPairs ++ [{NewB#block.indep_hash, SizeTaggedTXs}],
+			NewBlockHeightHash = gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash),
 			ar:info(
 				[
 					{writing_block, NewB#block.height},
@@ -244,7 +245,7 @@ get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs) ->
 					{blocks_to_write, (BehindCurrent - 1)}
 				]
 			),
-			get_block_and_trail(Peers, PreviousBlock, BehindCurrent - 1, BI, NewBlockTXPairs);
+			get_block_and_trail(Peers, PreviousBlock, BehindCurrent - 1, BI, NewBlockTXPairs, NewBlockHeightHash);
 		false ->
 			ar:info(
 				[
@@ -253,7 +254,7 @@ get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs) ->
 				]
 			),
 			timer:sleep(3000),
-			get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs)
+			get_block_and_trail(Peers, NewB, BehindCurrent, BI, BlockTXPairs, BlockHeightHash)
 	end.
 
 %% @doc Check that nodes can join a running network by using the fork recoverer.

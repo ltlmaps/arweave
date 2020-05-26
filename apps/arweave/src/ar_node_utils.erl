@@ -285,7 +285,8 @@ integrate_new_block(
 			txs := TXs,
 			block_index := BI,
 			block_txs_pairs := BlockTXPairs,
-			weave_size := WeaveSize
+			weave_size := WeaveSize,
+			block_height_hash := BlockHeightHash
 		} = StateIn,
 		NewB,
 		BlockTXs) ->
@@ -329,16 +330,17 @@ integrate_new_block(
 	),
 	BH = element(1, hd(NewBI)),
 	reset_miner(StateIn#{
-		block_index      => NewBI,
-		current          => BH,
-		txs              => ValidTXs,
-		height           => NewB#block.height,
-		reward_pool      => NewB#block.reward_pool,
-		diff             => NewB#block.diff,
-		last_retarget    => NewB#block.last_retarget,
-		weave_size       => NewB#block.weave_size,
-		block_txs_pairs  => NewBlockTXPairs,
-		mempool_size     => calculate_mempool_size(ValidTXs)
+		block_index       => NewBI,
+		current           => BH,
+		txs               => ValidTXs,
+		height            => NewB#block.height,
+		reward_pool       => NewB#block.reward_pool,
+		diff              => NewB#block.diff,
+		last_retarget     => NewB#block.last_retarget,
+		weave_size        => NewB#block.weave_size,
+		block_txs_pairs   => NewBlockTXPairs,
+		mempool_size      => calculate_mempool_size(ValidTXs),
+		block_height_hash => gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash)
 	}).
 
 update_block_index(B, BI) ->

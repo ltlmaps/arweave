@@ -75,24 +75,24 @@ remove_old_wallet_lists(Filepaths) ->
 cleanup_disk() ->
 	case is_full_disk() of
 		true ->
-			ReverseBI = lists:reverse(ar_node:get_block_index(whereis(http_entrypoint_node))),
-			ok = cleanup_by_paths(ReverseBI, 200 * 1000 * 1000, 0);
+			Iter = gb_sets:iterator(ar_node:get_block_height_hash(whereis(http_entrypoint_node))),
+			cleanup_by_paths(gb_sets:next(Iter), 200 * 1000 * 1000, 0);
 		false ->
 			ok
 	end.
 
-cleanup_by_paths([], _, _) ->
+cleanup_by_paths(none, _, _) ->
 	ok;
-cleanup_by_paths([{BH, _, _}|T], Size, CurrentSize) ->
+cleanup_by_paths({{_, BH}, Iter}, Size, CurrentSize) ->
 	case Size > CurrentSize of
 		true ->
 			case ar_storage:lookup_block_filename(BH) of
 				unavailable ->
-					cleanup_by_paths(T, Size, CurrentSize);
+					cleanup_by_paths(gb_sets:next(Iter), Size, CurrentSize);
 				BlockPath ->
 					case ar_storage:read_block(BH) of
 						unavailable ->
-							cleanup_by_paths(T, Size, CurrentSize);
+							cleanup_by_paths(gb_sets:next(Iter), Size, CurrentSize);
 						#block{ txs = TXs, wallet_list_hash = WalletListHash } ->
 							WalletLisPath = ar_storage:wallet_list_filepath(WalletListHash),
 							WalletBlockSum = lists:foldr(fun(Path, Acc) ->
@@ -106,7 +106,7 @@ cleanup_by_paths([{BH, _, _}|T], Size, CurrentSize) ->
 								file:delete(TXPath),
 								NewAcc
 							end, 0, TXs),
-							cleanup_by_paths(T, Size, CurrentSize + TXsSum + WalletBlockSum)
+							cleanup_by_paths(gb_sets:next(Iter), Size, CurrentSize + TXsSum + WalletBlockSum)
 					end
 				end;
 		false ->
