@@ -130,7 +130,11 @@ handle_cast(update_peer_sync_records, State) ->
 			timer:apply_after(200, gen_server, cast, [self(), update_peer_sync_records]);
 		Bridge ->
 			Peers = ar_bridge:get_remote_peers(Bridge),
-			BestPeers = pick_random_peers(Peers, ?BEST_PEERS_COUNT),
+			BestPeers = pick_random_peers(
+				Peers,
+				?CONSULT_PEER_RECORDS_COUNT,
+				?PICK_PEERS_OUT_OF_RANDOM_N
+			),
 			Self = self(),
 			spawn(
 				fun() ->
@@ -864,20 +868,11 @@ update_orphaned_chunks(OrphanedChunks, DataRootIndex, OrphanedChunkMap) ->
 		OrphanedChunkMap
 	).
 
-pick_random_peers(Peers, N) ->
-	pick_random_peers(Peers, 0, N, []).
-
-pick_random_peers(_Peers, Picked, N, List) when Picked == N ->
-	List;
-pick_random_peers([], _Picked, _N, List) ->
-	List;
-pick_random_peers([Peer | Peers], Picked, N, List) ->
-	case rand:uniform() > 0.5 of
-		true ->
-			pick_random_peers(Peers, Picked + 1, N, [Peer | List]);
-		false ->
-			pick_random_peers(Peers, Picked, N, List)
-	end.
+pick_random_peers(Peers, N, M) ->
+	lists:sublist(
+		lists:sort(fun(_, _) -> rand:uniform() > 0.5 end, lists:sublist(Peers, M)),
+		N
+	).
 
 get_random_interval(SyncRecord, PeerSyncRecords, WeaveSize) ->
 	%% Try keeping no more than ?MAX_SHARED_SYNCED_INTERVALS_COUNT intervals

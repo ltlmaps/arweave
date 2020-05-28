@@ -6,8 +6,11 @@
 -define(PAUSE_AFTER_COULD_NOT_FIND_CHUNK_MS, 30000).
 -endif.
 
-%% @doc The number of best peers to chosen periodically to fetch sync records and chunks from.
--define(BEST_PEERS_COUNT, 5).
+%% @doc The number of peer sync records to consult each time we look for an interval to sync.
+-define(CONSULT_PEER_RECORDS_COUNT, 5).
+%% @doc The number of best peers to pick ?CONSULT_PEER_RECORDS_COUNT from, to fetch the
+%% corresponding number of sync records.
+-define(PICK_PEERS_OUT_OF_RANDOM_N, 20).
 
 %% @doc The frequency of updating best peers' sync records.
 -ifdef(DEBUG).
