@@ -1,7 +1,7 @@
 %% @doc The time to wait after the whole weave is synced
 %% before looking for new chunks.
 -ifdef(DEBUG).
--define(PAUSE_AFTER_COULD_NOT_FIND_CHUNK_MS, 1000).
+-define(PAUSE_AFTER_COULD_NOT_FIND_CHUNK_MS, 2000).
 -else.
 -define(PAUSE_AFTER_COULD_NOT_FIND_CHUNK_MS, 30000).
 -endif.
@@ -14,7 +14,7 @@
 
 %% @doc The frequency of updating best peers' sync records.
 -ifdef(DEBUG).
--define(PEER_SYNC_RECORDS_FREQUENCY_MS, 1000).
+-define(PEER_SYNC_RECORDS_FREQUENCY_MS, 2000).
 -else.
 -define(PEER_SYNC_RECORDS_FREQUENCY_MS, 2 * 60 * 1000).
 -endif.
@@ -22,7 +22,7 @@
 %% @doc The time to wait between syncing different portions of
 %% the weave.
 -ifdef(DEBUG).
--define(SYNC_FREQUENCY_MS, 500).
+-define(SYNC_FREQUENCY_MS, 1000).
 -else.
 -define(SYNC_FREQUENCY_MS, 200).
 -endif.
