@@ -1,6 +1,6 @@
 -module(ar_fork_recovery).
 
--export([start/6]).
+-export([start/5]).
 
 -include("ar.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -19,8 +19,7 @@
 	target_hashes_to_go, % The hashes of the blocks left to apply (lowest to highest).
 	recovered_block_index, % The block index constructed during the fork recovery.
 	recovered_block_txs_pairs, % The block anchors required for verifying transactions, updated in process.
-	base_hash, % The hash of the base block.
-	block_height_hash % Height hashes of blocks
+	base_hash % The hash of the base block.
 }).
 
 %% @doc Start the fork recovery 'catch up' server.
@@ -30,7 +29,7 @@
 %% BI - the block index where the most recent block is the block to apply the fork on.
 %% ParentPID - the PID of the parent process.
 %% BlockTXPairs - the block anchors required to verify transactions.
-start(BlockHeightHash, Peers, RecoveryHashes, BI, ParentPID, BlockTXPairs) ->
+start(Peers, RecoveryHashes, BI, ParentPID, BlockTXPairs) ->
 	TargetHashes = lists:reverse(RecoveryHashes),
 	TargetHeight = length(BI) - 1 + length(RecoveryHashes),
 	ar:info(
@@ -52,8 +51,7 @@ start(BlockHeightHash, Peers, RecoveryHashes, BI, ParentPID, BlockTXPairs) ->
 					target_hashes_to_go = TargetHashes,
 					recovered_block_index = BI,
 					recovered_block_txs_pairs = BlockTXPairs,
-					base_hash = element(1, hd(BI)),
-					block_height_hash = BlockHeightHash
+					base_hash = element(1, hd(BI))
 				}
 			)
 		end
@@ -69,10 +67,9 @@ server(#state {
 		recovered_block_txs_pairs = BlockTXPairs,
 		target_hashes_to_go = [],
 		parent_pid = ParentPID,
-		base_hash = BaseH,
-		block_height_hash = BlockHeightHash
+		base_hash = BaseH
 	}) ->
-	ParentPID ! {fork_recovered, BI, BlockTXPairs, BaseH, BlockHeightHash};
+	ParentPID ! {fork_recovered, BI, BlockTXPairs, BaseH};
 server(S = #state { target_height = TargetHeight }) ->
 	receive
 		{parent_accepted_block, B} ->
@@ -232,8 +229,7 @@ apply_next_block(State, NextB, B) ->
 		parent_pid = ParentPID,
 		target_hashes_to_go = [_ | NewTargetHashesToGo],
 		target_hashes = TargetHashes,
-		base_hash = BaseH,
-		block_height_hash = BlockHeightHash
+		base_hash = BaseH
 	} = State,
 	TXs = NextB#block.txs,
 	case
@@ -290,7 +286,7 @@ apply_next_block(State, NextB, B) ->
 			BH = NextB#block.indep_hash,
 			NewBlockTXPairs =
 				ar_node_utils:update_block_txs_pairs(BH, SizeTaggedTXs, BlockTXPairs),
-			NewBlockHeightHash = gb_sets:add({NextB#block.height, NextB#block.indep_hash}, BlockHeightHash),
+			ar_downloader:store_height_hash_index(NextB),
 			lists:foreach(
 				fun(TX) ->
 					ar_downloader:enqueue_random({tx_data, TX})
@@ -305,7 +301,7 @@ apply_next_block(State, NextB, B) ->
 							{height, NextB#block.height}
 						]
 					),
-					ParentPID ! {fork_recovered, NewBI, NewBlockTXPairs, BaseH, NewBlockHeightHash};
+					ParentPID ! {fork_recovered, NewBI, NewBlockTXPairs, BaseH};
 				_ -> do_nothing
 			end,
 			self() ! apply_next_block,
@@ -314,8 +310,7 @@ apply_next_block(State, NextB, B) ->
 				State#state {
 					recovered_block_index = NewBI,
 					recovered_block_txs_pairs = NewBlockTXPairs,
-					target_hashes_to_go = NewTargetHashesToGo,
-					block_height_hash = NewBlockHeightHash
+					target_hashes_to_go = NewTargetHashesToGo
 				}
 			)
 	end.

@@ -160,9 +160,9 @@ handle(SPid, {work_complete, BaseBH, NewB, MinedTXs, BDS, POA}) ->
 			ar:info([{event, ignore_mined_block}, {reason, accepted_foreign_block}]),
 			{ok, ignore}
 	end;
-handle(SPid, {fork_recovered, BI, BlockTXPairs, BaseH, BlockHeightHash}) ->
+handle(SPid, {fork_recovered, BI, BlockTXPairs, BaseH}) ->
 	{ok, StateIn} = ar_node_state:all(SPid),
-	case recovered_from_fork(StateIn#{block_height_hash => BlockHeightHash}, BI, BlockTXPairs, BaseH) of
+	case recovered_from_fork(StateIn, BI, BlockTXPairs, BaseH) of
 		{ok, StateOut} ->
 			ar_node_state:update(SPid, StateOut);
 		none ->
@@ -183,18 +183,17 @@ handle(SPid, {replace_block_list, [Block | _] = Blocks}) ->
 	BI = lists:map(fun ar_util:block_index_entry_from_block/1, Blocks),
 	BlockTXPairs = lists:map(
 		fun(B) ->
+			ar_downloader:store_height_hash_index(B),
 			SizeTaggedTXs = ar_block:generate_size_tagged_list_from_txs(B#block.txs),
 			{B#block.indep_hash, SizeTaggedTXs}
 		end,
 		Blocks
 	),
-	{ok, BlockHeightHash} = ar_node_state:lookup(SPid, block_height_hash),
 	ar_node_state:update(SPid, [
 		{block_index, BI},
 		{block_txs_pairs, BlockTXPairs},
 		{wallet_list, Block#block.wallet_list},
-		{height, Block#block.height},
-		{block_height_hash, lists:foldl(fun(B, Acc) -> gb_sets:add({B#block.height, B#block.indep_hash}, Acc) end, BlockHeightHash, Blocks)}
+		{height, Block#block.height}
 	]),
 	{ok, replace_block_list};
 handle(SPid, {set_reward_addr, Addr}) ->
@@ -600,17 +599,16 @@ maybe_fork_recover(State, BShadow, Peer, RecoveryHashes, BI, BlockTXPairs) ->
 	#{
 		block_index := StateBI,
 		cumulative_diff := CDiff,
-		node:= Node,
-		block_height_hash := BlockHeightHash
+		node:= Node
 	} = State,
 	case is_fork_preferable(BShadow, CDiff, StateBI) of
 		false ->
 			none;
 		true ->
-			{ok, fork_recover(BlockHeightHash, Node, Peer, RecoveryHashes, BI, BlockTXPairs)}
+			{ok, fork_recover(Node, Peer, RecoveryHashes, BI, BlockTXPairs)}
 	end.
 
-fork_recover(BlockHeightHash, Node, Peer, RecoveryHashes, BI, BlockTXPairs) ->
+fork_recover(Node, Peer, RecoveryHashes, BI, BlockTXPairs) ->
 	case {whereis(fork_recovery_server), whereis(join_server)} of
 		{undefined, undefined} ->
 			PrioritisedPeers = ar_util:unique(Peer) ++
@@ -621,7 +619,6 @@ fork_recover(BlockHeightHash, Node, Peer, RecoveryHashes, BI, BlockTXPairs) ->
 			erlang:monitor(
 				process,
 				PID = ar_fork_recovery:start(
-					BlockHeightHash,
 					PrioritisedPeers,
 					RecoveryHashes,
 					BI,
@@ -645,12 +642,11 @@ integrate_block_from_miner(#{ block_index := not_joined }, _NewB, _MinedTXs, _BD
 	none;
 integrate_block_from_miner(StateIn, NewB, MinedTXs, BDS, _POA) ->
 	#{
-		block_index       := BI,
-		txs               := TXs,
-		gossip            := GS,
-		block_txs_pairs   := BlockTXPairs,
-		weave_size        := WeaveSize,
-		block_height_hash := BlockHeightHash
+		block_index      := BI,
+		txs              := TXs,
+		gossip           := GS,
+		block_txs_pairs  := BlockTXPairs,
+		weave_size       := WeaveSize
 	} = StateIn,
 	NewBI = ar_node_utils:update_block_index(NewB#block{ txs = MinedTXs }, BI),
 	SizeTaggedTXs = ar_block:generate_size_tagged_list_from_txs(MinedTXs),
@@ -691,6 +687,7 @@ integrate_block_from_miner(StateIn, NewB, MinedTXs, BDS, _POA) ->
 		MinedTXs
 	),
 	BH = element(1, hd(NewBI)),
+	ar_downloader:store_height_hash_index(NewB),
 	NewState = ar_node_utils:reset_miner(
 		StateIn#{
 			block_index          => NewBI,
@@ -704,15 +701,14 @@ integrate_block_from_miner(StateIn, NewB, MinedTXs, BDS, _POA) ->
 			weave_size           => NewB#block.weave_size,
 			block_txs_pairs      => NewBlockTXPairs,
 			wallet_list          => NewB#block.wallet_list,
-			mempool_size         => ar_node_utils:calculate_mempool_size(ValidTXs),
-			block_height_hash    => gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash)
+			mempool_size         => ar_node_utils:calculate_mempool_size(ValidTXs)
 		}
 	),
 	{ok, NewState}.
 
 %% @doc Handle executed fork recovery.
 recovered_from_fork(#{ block_index := not_joined } = StateIn, BI, BlockTXPairs, _BaseH) ->
-	#{ txs := TXs, block_height_hash := BlockHeightHash } = StateIn,
+	#{ txs := TXs } = StateIn,
 	NewB = ar_storage:read_block(element(1, hd(BI))),
 	{_, SizeTaggedTXs} = hd(BlockTXPairs),
 	ar:info(
@@ -737,6 +733,7 @@ recovered_from_fork(#{ block_index := not_joined } = StateIn, BI, BlockTXPairs, 
 		lists:sublist(BI, ?TRACK_CONFIRMATIONS),
 		NewB#block.weave_size - NewB#block.block_size
 	),
+	ar_downloader:store_height_hash_index(NewB),
 	{ok, ar_node_utils:reset_miner(
 		StateIn#{
 			block_index          => BI,
@@ -749,8 +746,7 @@ recovered_from_fork(#{ block_index := not_joined } = StateIn, BI, BlockTXPairs, 
 			last_retarget        => NewB#block.last_retarget,
 			weave_size           => NewB#block.weave_size,
 			block_txs_pairs      => BlockTXPairs,
-			mempool_size         => ar_node_utils:calculate_mempool_size(ValidTXs),
-		  block_height_hash	   => gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash)
+			mempool_size         => ar_node_utils:calculate_mempool_size(ValidTXs)
 		}
 	)};
 recovered_from_fork(#{ block_index := CurrentBI } = StateIn, BI, BlockTXPairs, BaseH) ->
@@ -767,7 +763,7 @@ recovered_from_fork(#{ block_index := CurrentBI } = StateIn, BI, BlockTXPairs, B
 	end.
 
 do_recovered_from_fork(StateIn, NewB, BI, BlockTXPairs, BaseH) ->
-	#{ txs := TXs, block_height_hash := BlockHeightHash } = StateIn,
+	#{ txs := TXs } = StateIn,
 	ar:info(
 		[
 			{event, fork_recovered_successfully},
@@ -798,6 +794,7 @@ do_recovered_from_fork(StateIn, NewB, BI, BlockTXPairs, BaseH) ->
 		end,
 		lists:reverse(AppliedBlockTXPairs)
 	),
+	ar_downloader:store_height_hash_index(NewB),
 	{ok, ar_node_utils:reset_miner(
 		StateIn#{
 			block_index          => BI,
@@ -811,8 +808,7 @@ do_recovered_from_fork(StateIn, NewB, BI, BlockTXPairs, BaseH) ->
 			weave_size           => NewB#block.weave_size,
 			cumulative_diff      => NewB#block.cumulative_diff,
 			block_txs_pairs      => BlockTXPairs,
-			mempool_size         => ar_node_utils:calculate_mempool_size(ValidTXs),
-			block_height_hash    => gb_sets:add({NewB#block.height, NewB#block.indep_hash}, BlockHeightHash)
+			mempool_size         => ar_node_utils:calculate_mempool_size(ValidTXs)
 		}
 	)}.
 

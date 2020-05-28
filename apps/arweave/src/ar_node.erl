@@ -33,7 +33,6 @@
 -export([set_loss_probability/2, set_delay/2, set_mining_delay/2, set_xfer_speed/2]).
 
 -export([get_mempool_size/1]).
--export([get_block_height_hash/1]).
 
 -include("ar.hrl").
 
@@ -160,17 +159,17 @@ start(Peers, BI, MiningDelay, RewardAddr, AutoJoin, Diff, LastRetarget) ->
 				),
 			Wallets = ar_util:wallets_from_hashes(BI),
 			Height = ar_util:height_from_hashes(BI),
-			{BlockHeightHash, {RewardPool, WeaveSize, Current}} =
+			{RewardPool, WeaveSize, Current} =
 				case BI of
 					not_joined ->
-						{gb_sets:new(), {0, 0, not_joined}};
+						{0, 0, not_joined};
 					[{H, _, _} | _] ->
 						B = ar_storage:read_block(H),
-						BHH = lists:foldl(fun({BH, _, _}, Acc) ->
+						lists:foreach(fun({BH, _, _}) ->
 							Block = ar_storage:read_block(BH),
-							gb_sets:add({Block#block.height, Block#block.indep_hash}, Acc)
-						end, gb_sets:new(), BI),
-						{BHH, {B#block.reward_pool, B#block.weave_size, H}}
+							ar_downloader:store_height_hash_index(Block)
+						end, BI),
+						{B#block.reward_pool, B#block.weave_size, H}
 				end,
 			%% Start processes, init state, and start server.
 			NPid = self(),
@@ -194,8 +193,7 @@ start(Peers, BI, MiningDelay, RewardAddr, AutoJoin, Diff, LastRetarget) ->
 				{diff, Diff},
 				{last_retarget, LastRetarget},
 				{weave_size, WeaveSize},
-				{block_txs_pairs, create_block_txs_pairs(BI)},
-				{block_height_hash, BlockHeightHash}
+				{block_txs_pairs, create_block_txs_pairs(BI)}
 			]),
 			server(SPid, WPid, queue:new())
 		end
@@ -347,14 +345,6 @@ get_block_index(Node) ->
 		{Ref, blockindex, not_joined} -> [];
 		{Ref, blockindex, BI} -> BI
 		after ?LOCAL_NET_TIMEOUT -> []
-	end.
-
-get_block_height_hash(Node) ->
-	Ref = make_ref(),
-	Node ! {block_height_hash, self(), Ref},
-	receive
-		{Ref, block_height_hash, BlockHeightHash} -> BlockHeightHash
-		after ?LOCAL_NET_TIMEOUT -> gb_sets:new()
 	end.
 
 %% @doc Get the current block hash.
@@ -669,8 +659,8 @@ handle(SPid, {work_complete, BaseBH, NewB, MinedTXs, BDS, POA, _HashesTried}) ->
 				POA
 			}}
 	end;
-handle(_SPid, {fork_recovered, BI, BlockTXPairs, BaseH, BlockHeightHash}) ->
-	{task, {fork_recovered, BI, BlockTXPairs, BaseH, BlockHeightHash}};
+handle(_SPid, {fork_recovered, BI, BlockTXPairs, BaseH}) ->
+	{task, {fork_recovered, BI, BlockTXPairs, BaseH}};
 handle(_SPid, mine) ->
 	{task, mine};
 handle(_SPid, automine) ->
@@ -703,10 +693,6 @@ handle(SPid, {get_walletlist, From, Ref}) ->
 handle(SPid, {get_blockindex, From, Ref}) ->
 	{ok, BI} = ar_node_state:lookup(SPid, block_index),
 	From ! {Ref, blockindex, BI},
-	ok;
-handle(SPid, {block_height_hash, From, Ref}) ->
-	{ok, BHH} = ar_node_state:lookup(SPid, block_height_hash),
-	From ! {Ref, block_height_hash, BHH},
 	ok;
 handle(SPid, {get_current_block_hash, From, Ref}) ->
 	{ok, Res} = ar_node_state:lookup(SPid, current),
