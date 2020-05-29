@@ -1,4 +1,5 @@
 -module(ar_blacklist_middleware).
+
 -behaviour(cowboy_middleware).
 
 %% cowboy_middleware callbacks
@@ -9,10 +10,8 @@
 -export([decrement_ip_addr/2]).
 
 -include("ar.hrl").
+-include("ar_blacklist_middleware.hrl").
 -include_lib("eunit/include/eunit.hrl").
-
--define(THROTTLE_PERIOD, 30000).
--define(BAN_CLEANUP_INTERVAL, 60000).
 
 execute(Req, Env) ->
 	IpAddr = requesting_ip_addr(Req),
@@ -103,9 +102,5 @@ requesting_ip_addr(Req) ->
 peer_to_ip_addr({A, B, C, D, _}) -> {A, B, C, D}.
 
 get_key_limit(Req) ->
-	case ar_http_iface_server:split_path(cowboy_req:path(Req)) of
-		[<<"chunk">> | _] ->
-			{chunk, 6000};
-		_ ->
-			{default, ar_meta_db:get(requests_per_minute_limit)}
-	end.
+	Path = ar_http_iface_server:split_path(cowboy_req:path(Req)),
+	?RPM_BY_PATH(Path)().
