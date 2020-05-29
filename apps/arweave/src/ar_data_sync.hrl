@@ -19,14 +19,6 @@
 -define(PEER_SYNC_RECORDS_FREQUENCY_MS, 2 * 60 * 1000).
 -endif.
 
-%% @doc The time to wait between syncing different portions of
-%% the weave.
--ifdef(DEBUG).
--define(SYNC_FREQUENCY_MS, 1000).
--else.
--define(SYNC_FREQUENCY_MS, 200).
--endif.
-
 %% @doc The size in bits of the offset key in kv databases.
 -define(OFFSET_KEY_BITSIZE, (?NOTE_SIZE * 8)).
 

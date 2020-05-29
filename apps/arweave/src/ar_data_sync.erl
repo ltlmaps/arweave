@@ -202,14 +202,13 @@ handle_cast({sync_chunk, Peer, LeftBound, RightBound}, State) ->
 						Self,
 						{store_fetched_chunk, Peer, LeftBound, RightBound, Proof}
 					);
-				{error, _} ->
-					NextByte = LeftBound + ?DATA_CHUNK_SIZE,
-					timer:apply_after(
-						?SYNC_FREQUENCY_MS,
-						gen_server,
-						cast,
-						[Self, {sync_chunk, Peer, NextByte, RightBound}]
-					)
+				{error, E} ->
+					ar:err([
+						{event, failed_to_fetch_chunk},
+						{peer, ar_util:format_peer(Peer)},
+						{reason, E}
+					]),
+					gen_server:cast(Self, sync_random_interval)
 			end
 		end
 	),
@@ -233,12 +232,7 @@ handle_cast({store_fetched_chunk, Peer, LeftBound, RightBound, Proof}, State) ->
 			}};
 		{true, DataRoot, TXStartOffset, ChunkEndOffset} ->
 			ChunkSize = byte_size(Chunk),
-			timer:apply_after(
-				?SYNC_FREQUENCY_MS,
-				gen_server,
-				cast,
-				[self(), {sync_chunk, Peer, LeftBound + ChunkSize, RightBound}]
-			),
+			gen_server:cast(self(), {sync_chunk, Peer, LeftBound + ChunkSize, RightBound}),
 			case store_chunk(
 				State,
 				BlockStartOffset + TXStartOffset + ChunkEndOffset,
