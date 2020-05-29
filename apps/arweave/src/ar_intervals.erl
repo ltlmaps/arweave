@@ -185,10 +185,10 @@ serialize_item(End, Start, json) ->
 
 from_etf(Binary) ->
 	L = binary_to_term(Binary, [safe]),
-	from_etf(L, -1, gb_sets:new()).
+	from_etf(L, infinity, gb_sets:new()).
 
 from_etf([], _, Intervals) ->
 	{ok, Intervals};
-from_etf([{<< End:256 >>, << Start:256 >>} | List], L, Intervals)
-		when End > Start andalso Start > L ->
-	from_etf(List, End, gb_sets:add_element({End, Start}, Intervals)).
+from_etf([{<< End:256 >>, << Start:256 >>} | List], R, Intervals)
+		when End > Start andalso R > End andalso Start >= 0 ->
+	from_etf(List, Start, gb_sets:add_element({End, Start}, Intervals)).

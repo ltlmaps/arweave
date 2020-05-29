@@ -557,7 +557,7 @@ post_random_blocks(Master, Wallet) ->
 		[v2],
 		empty,
 		empty,
-		[v2_original_split, v2, v1, v2],
+		[v2_original_split, v2_no_data, v2, v1, v2],
 		empty,
 		empty,
 		empty,
@@ -576,6 +576,8 @@ post_random_blocks(Master, Wallet) ->
 							{v1_tx(Wallet), v1};
 						(v2) ->
 							{tx(Wallet, {custom_split, random}), v2};
+						(v2_no_data) -> % same as v2 but its data won't be submitted
+							{tx(Wallet, {custom_split, random}), v2_no_data};
 						(v2_original_split) ->
 							{tx(Wallet, original_split), v2_original_split}
 					end,
@@ -594,7 +596,7 @@ post_random_blocks(Master, Wallet) ->
 					end,
 					TXsWithChunks
 				),
-				[{B, TX, Chunks} || {{TX, Chunks}, _} <- TXsWithChunks] ++ Acc
+				[{B, TX, C} || {{TX, C}, Type} <- TXsWithChunks, Type /= v2_no_data] ++ Acc
 		end,
 		[],
 		lists:zip(BlockMap, lists:seq(1, length(BlockMap)))
