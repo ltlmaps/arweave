@@ -13,7 +13,7 @@ end).
 -else.
 -define(RPM_BY_PATH(Path), fun() ->
 	case Path of
-		[<<"chunk">> | _]            -> {chunk,            6000};
+		[<<"chunk">> | _]            -> {chunk,            12000}; % sufficient to upload 50 MB/s
 		[<<"data_sync_record">> | _] -> {data_sync_record, 4};
 		_ ->                            {default,          900}
 	end
